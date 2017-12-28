@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq.Expressions;
 using System.Reflection;
 using Castle.DynamicProxy;
 using Newtonsoft.Json;
@@ -22,6 +23,52 @@ namespace ManyMonkeys.Hale.Proxy
 
             return proxy; 
         }
+
+        public static TValue GetValueOrDefault<TValue, T>(this T entity, Func<T, TValue> action, 
+            TValue defaultValue = default(TValue)) where T : class, IHaleObject
+        {
+            try
+            {
+                var value = action(entity);
+                return value;
+            }
+            catch (ReferenceNotFoundException)
+            {
+            }
+            return defaultValue;
+        }
+
+        public static bool IsReferenced<TValue, T>(this T entity, Func<T, TValue> action)
+            where T : class, IHaleObject
+        {
+            try
+            {
+                action(entity);
+            }
+            catch (ReferenceNotFoundException)
+            {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    public class ReferenceNotFoundException : Exception
+    {
+        public ReferenceNotFoundException()
+        {
+
+        }
+
+        public ReferenceNotFoundException(string message) : base(message)
+        {
+
+        }
+
+        public ReferenceNotFoundException(string message, Exception exception) : base(message, exception)
+        {
+
+        }
     }
 
     public class HaleObjectInterceptor : IInterceptor
@@ -41,18 +88,18 @@ namespace ManyMonkeys.Hale.Proxy
                 var declaringType = invocation.Method.DeclaringType;
                 property = declaringType.GetProperty(name);
                 var attr = property.GetCustomAttribute<JsonPropertyAttribute>();
-                if (attr != null)
-                {
-                    name = attr.PropertyName;
-                }
-
-                return name;
+                return attr?.PropertyName ?? name;
             }
 
             if (invocation.Method.IsSpecialName && invocation.Method.Name.StartsWith("get_"))
             {
                 var name = GetPropertySerializationName(out var property);
-                invocation.ReturnValue = Convert.ChangeType(_obj[name], property.PropertyType);
+                if (!_obj.TryGetValue(name, out var token))
+                {
+                    throw new ReferenceNotFoundException(@"Property not found: {name}");
+                }
+                var value = _obj[name];
+                invocation.ReturnValue = Convert.ChangeType(value, property.PropertyType);
             }
 
             if (invocation.Method.IsSpecialName && invocation.Method.Name.StartsWith("set_"))
